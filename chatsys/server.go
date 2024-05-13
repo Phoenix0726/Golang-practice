@@ -64,15 +64,10 @@ func (this *Server) Start() {
 
 // 业务处理
 func (this *Server) Handler(conn net.Conn) {
-    user := NewUser(conn)
+    user := NewUser(conn, this)
 
-    // 用户上线，将用户加入到 OnlineMap 中
-    this.mapLock.Lock()
-    this.OnlineMap[user.Name] = user
-    this.mapLock.Unlock()
-
-    // 广播用户上线消息
-    this.BroadCast(user, "已上线")
+    // 用户上线
+    user.Online()
 
     // 接收客户端发来的消息
     go func() {
@@ -81,7 +76,8 @@ func (this *Server) Handler(conn net.Conn) {
             n, err := conn.Read(buf)
 
             if n == 0 {
-                this.BroadCast(user, "下线")
+                // 用户下线
+                user.Offline()
                 return
             }
 
@@ -91,7 +87,9 @@ func (this *Server) Handler(conn net.Conn) {
             }
 
             msg := string(buf[:n-1])    // 提取用户消息并去除'\n'
-            this.BroadCast(user, msg)
+
+            // 处理消息
+            user.DoMessage(msg)
         }
     } ()
 
