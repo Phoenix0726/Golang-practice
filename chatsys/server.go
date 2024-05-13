@@ -5,6 +5,7 @@ import (
     "net"
     "sync"
     "io"
+    "time"
 )
 
 
@@ -69,6 +70,9 @@ func (this *Server) Handler(conn net.Conn) {
     // 用户上线
     user.Online()
 
+    // 监听用户是否活跃
+    isLive := make(chan bool)
+
     // 接收客户端发来的消息
     go func() {
         buf := make([]byte, 4096)
@@ -90,10 +94,30 @@ func (this *Server) Handler(conn net.Conn) {
 
             // 处理消息
             user.DoMessage(msg)
+
+            // 当前用户活跃
+            isLive <- true
         }
     } ()
 
-    select {
+    for {
+        select {
+        case <- isLive:
+            // 激活 select，重置下面的定时器
+            user.SendMsg("I'm live")
+        case <- time.After(time.Second * 10):
+            // 超时，关闭当前 user
+            fmt.Println(user.Name, "中断连接")
+            user.SendMsg("长时间未使用，连接中断")
+
+            // 关闭 channel
+            close(user.C)
+
+            // 关闭连接
+            conn.Close()
+
+            return
+        }
     }
 }
 
