@@ -2,6 +2,7 @@ package main
 
 import (
     "net"
+    "strings"
 )
 
 
@@ -66,13 +67,27 @@ func (this *User) Offline() {
 
 // 处理消息
 func (this *User) DoMessage(msg string) {
-    if msg == "who" {
+    if msg == "who" {   // 查询当前在线用户
         this.server.mapLock.Lock()
         for _, user := range this.server.OnlineMap {
             onlineMsg := "[" + user.Addr + "]" + user.Name + ":" + "在线"
             this.SendMsg(onlineMsg)
         }
         this.server.mapLock.Unlock()
+    } else if len(msg) > 7 && msg[:7] == "rename " {    // 用户重命名 rename newname
+        newName := strings.Split(msg, " ")[1]
+        _, ok := this.server.OnlineMap[newName]
+        if ok {
+            this.SendMsg("该用户名已被使用")
+        } else {
+            this.server.mapLock.Lock()
+            delete(this.server.OnlineMap, this.Name)
+            this.server.OnlineMap[newName] = this
+            this.server.mapLock.Unlock()
+
+            this.Name = newName
+            this.SendMsg("修改用户名为: " + this.Name)
+        }
     } else {
         this.server.BroadCast(this, msg)
     }
