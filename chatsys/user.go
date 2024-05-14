@@ -66,7 +66,7 @@ func (this *User) Offline() {
 
 
 // 处理消息
-func (this *User) DoMessage(msg string) {
+func (this *User) DealMessage(msg string) {
     if msg == "who" {   // 查询当前在线用户
         this.server.mapLock.Lock()
         for _, user := range this.server.OnlineMap {
@@ -74,7 +74,8 @@ func (this *User) DoMessage(msg string) {
             this.SendMsg(onlineMsg)
         }
         this.server.mapLock.Unlock()
-    } else if len(msg) > 7 && msg[:7] == "rename " {    // 用户重命名 rename newname
+    } else if len(msg) > 7 && msg[:7] == "rename " {
+        // 用户重命名 rename newname
         newName := strings.Split(msg, " ")[1]
         _, ok := this.server.OnlineMap[newName]
         if ok {
@@ -88,6 +89,23 @@ func (this *User) DoMessage(msg string) {
             this.Name = newName
             this.SendMsg("修改用户名为: " + this.Name)
         }
+    } else if len(msg) > 3 && msg[:3] == "to " {
+        // 私发消息 to username content
+        marr := strings.Split(msg, " ")
+        if len(marr) < 3 {
+            this.SendMsg("消息格式不正确，请使用 [to username content] 格式")
+            return
+        }
+
+        toName := marr[1]
+        toUser, ok := this.server.OnlineMap[toName]
+        if !ok {
+            this.SendMsg("该用户不在线\n")
+            return
+        }
+
+        content := marr[2]
+        toUser.SendMsg(this.Name + ": " + content)
     } else {
         this.server.BroadCast(this, msg)
     }

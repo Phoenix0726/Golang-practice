@@ -93,7 +93,7 @@ func (this *Server) Handler(conn net.Conn) {
             msg := string(buf[:n-1])    // 提取用户消息并去除'\n'
 
             // 处理消息
-            user.DoMessage(msg)
+            user.DealMessage(msg)
 
             // 当前用户活跃
             isLive <- true
@@ -104,11 +104,12 @@ func (this *Server) Handler(conn net.Conn) {
         select {
         case <- isLive:
             // 激活 select，重置下面的定时器
-            user.SendMsg("I'm live")
-        case <- time.After(time.Second * 10):
+        case <- time.After(time.Second * 60):
             // 超时，关闭当前 user
             fmt.Println(user.Name, "中断连接")
             user.SendMsg("长时间未使用，连接中断")
+
+            time.Sleep(time.Second)
 
             // 关闭 channel
             close(user.C)
