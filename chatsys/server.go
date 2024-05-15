@@ -69,6 +69,7 @@ func (this *Server) Handler(conn net.Conn) {
 
     // 用户上线
     user.Online()
+    fmt.Println(user.Name + "上线")
 
     // 监听用户是否活跃
     isLive := make(chan bool)
