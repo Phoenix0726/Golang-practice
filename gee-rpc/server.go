@@ -2,13 +2,14 @@ package geerpc
 
 import (
     "encoding/json"
-    "fmt"
     "geerpc/codec"
     "io"
     "log"
     "net"
     "reflect"
     "sync"
+    "errors"
+    "strings"
 )
 
 
@@ -29,7 +30,9 @@ var DefaultOption = &Option {
 
 
 // RPC Server
-type Server struct {}
+type Server struct {
+    serviceMap sync.Map
+}
 
 
 func NewServer() *Server {
@@ -113,6 +116,8 @@ type request struct {
     header *codec.Header
     argv reflect.Value
     replyv reflect.Value
+    svc *service
+    mType *methodType
 }
 
 
@@ -136,11 +141,21 @@ func (server *Server) readRequest(cc codec.Codec) (*request, error) {
     }
 
     req := &request{header: header}
-    req.argv = reflect.New(reflect.TypeOf(""))
-    
-    err = cc.ReadBody(req.argv.Interface())
+    req.svc, req.mType, err = server.findService(header.ServiceMethod)
     if err != nil {
-        log.Println("rpc server: read argv error:", err)
+        return req, err
+    }
+    req.argv = req.mType.newArgv()
+    req.replyv = req.mType.newReplyv()
+
+    argv := req.argv.Interface()
+    if req.argv.Type().Kind() != reflect.Ptr {
+        argv = req.argv.Addr().Interface()
+    }
+    
+    err = cc.ReadBody(argv)
+    if err != nil {
+        log.Println("rpc server: read body error:", err)
     }
 
     return req, nil
@@ -159,7 +174,49 @@ func (server *Server) sendResponse(cc codec.Codec, header *codec.Header, body in
 
 func (server *Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex, wg *sync.WaitGroup) {
     defer wg.Done()
-    log.Println(req.header, req.argv.Elem())
-    req.replyv = reflect.ValueOf(fmt.Sprintf("geerpc resp %d", req.header.Seq))
+    if err := req.svc.call(req.mType, req.argv, req.replyv); err != nil {
+        req.header.Error = err.Error()
+        server.sendResponse(cc, req.header, invalidRequest, sending)
+    }
     server.sendResponse(cc, req.header, req.replyv.Interface(), sending)
+}
+
+
+func (server *Server) Register(rcvr interface{}) error {
+    s := newService(rcvr)
+    // LoadOrStore 如果 map 中存在给定的 key，则返回现存的 value，否则存储给定的 value
+    if _, dup := server.serviceMap.LoadOrStore(s.name, s); dup {
+        return errors.New("rpc: service already defined:" + s.name)
+    }
+    return nil
+}
+
+
+func Register(rcvr interface{}) error {
+    return DefaultServer.Register(rcvr)
+}
+
+
+func (server *Server) findService(serviceMethod string) (svc *service, mType *methodType, err error) {
+    dotIdx := strings.LastIndex(serviceMethod, ".")     // Service.Method
+    if dotIdx < 0 {
+        err = errors.New("rpc server: service/method request ill-formed:" + serviceMethod)
+        return
+    }
+
+    serviceName, methodName := serviceMethod[:dotIdx], serviceMethod[dotIdx+1:]
+    s, ok := server.serviceMap.Load(serviceName)
+    if !ok {
+        err = errors.New("rpc server: can't find service " + serviceName)
+        return
+    }
+
+    svc = s.(*service)
+    mType = svc.method[methodName]
+    if mType == nil {
+        err = errors.New("rpc server: can't find method " + methodName)
+        return
+    }
+
+    return
 }
