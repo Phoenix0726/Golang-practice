@@ -7,10 +7,13 @@ import (
     "geerpc/codec"
     "io"
     "log"
-    "net"
     "sync"
     "time"
     "context"
+    "net"
+    "net/http"
+    "bufio"
+    "strings"
 )
 
 
@@ -190,6 +193,20 @@ func parseOptions(opts ...*Option) (*Option, error) {
 
 // 通过指定的网络地址连接到 RPC 服务器
 func Dial(network, address string, opts ...*Option) (client *Client, err error) {
+    return dialTimeout(NewClient, network, address, opts...)
+}
+
+
+type clientResult struct {
+    client *Client
+    err error
+}
+
+
+type newClientFunc func(conn net.Conn, opt *Option) (client *Client, err error)
+
+
+func dialTimeout(newCliFun newClientFunc, network, address string, opts ...*Option) (client *Client, err error) {
     opt, err := parseOptions(opts...)
     if err != nil {
         return nil, err
@@ -208,7 +225,7 @@ func Dial(network, address string, opts ...*Option) (client *Client, err error) 
 
     ch := make(chan clientResult)
     go func() {
-        client, err := NewClient(conn, opt)
+        client, err := newCliFun(conn, opt)
         ch <- clientResult{client: client, err: err}
     } ()
 
@@ -222,12 +239,6 @@ func Dial(network, address string, opts ...*Option) (client *Client, err error) 
     case result := <-ch:
         return result.client, result.err
     }
-}
-
-
-type clientResult struct {
-    client *Client
-    err error
 }
 
 
@@ -284,5 +295,41 @@ func (client *Client) Call(ctx context.Context, serviceMethod string, args, repl
         return errors.New("rpc client: call failed: " + ctx.Err().Error())
     case call := <-call.Done:
         return call.Error
+    }
+}
+
+
+func NewHttpClient(conn net.Conn, opt *Option) (*Client, error) {
+    _, _ = io.WriteString(conn, fmt.Sprintf("CONNECT %s HTTP/1.0\n\n", defaultRPCPath))
+
+    resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: "CONNECT"})
+    if err == nil && resp.Status == connected {
+        return NewClient(conn, opt)
+    }
+    
+    if err == nil {
+        err = errors.New("unexpected HTTP response: " + resp.Status)
+    }
+    return nil, err
+}
+
+
+func DialHTTP(network, address string, opts ...*Option) (*Client, error) {
+    return dialTimeout(NewHttpClient, network, address, opts...)
+}
+
+
+func XDial(rpcAddr string, opts ...*Option) (*Client, error) {
+    parts := strings.Split(rpcAddr, "@")
+    if len(parts) != 2 {
+        return nil, fmt.Errorf("rpc client error: wrong format '%s', expect protocol@addr", rpcAddr)
+    }
+
+    protocol, addr := parts[0], parts[1]
+    switch protocol {
+    case "http":
+        return DialHTTP("tcp", addr, opts...)
+    default:
+        return Dial(protocol, addr, opts...)
     }
 }
