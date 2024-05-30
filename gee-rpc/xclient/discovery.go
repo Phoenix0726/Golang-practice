@@ -6,6 +6,9 @@ import (
     "math/rand"
     "sync"
     "time"
+    "log"
+    "strings"
+    "net/http"
 )
 
 
@@ -90,4 +93,80 @@ func (d *MultiServersDiscovery) GetAll() ([]string, error) {
     servers := make([]string, len(d.servers), len(d.servers))
     copy(servers, d.servers)
     return servers, nil
+}
+
+
+type GeeRegistryDiscovery struct {
+    *MultiServersDiscovery
+    registry string
+    timeout time.Duration
+    lastUpdate time.Time
+}
+
+
+const defaultUpdateTimeout = time.Second * 10
+
+
+func NewGeeRegistryDiscovery(registryAddr string, timeout time.Duration) *GeeRegistryDiscovery {
+    if timeout == 0 {
+        timeout = defaultUpdateTimeout
+    }
+    d := &GeeRegistryDiscovery {
+        MultiServersDiscovery: NewMultiServersDiscovery(make([]string, 0)),
+        registry: registryAddr,
+        timeout: timeout,
+    }
+    return d
+}
+
+
+func (d *GeeRegistryDiscovery) Update(servers []string) error {
+    d.mtx.Lock()
+    defer d.mtx.Unlock()
+    d.servers = servers
+    d.lastUpdate = time.Now()
+    return nil
+}
+
+
+func (d *GeeRegistryDiscovery) Refresh() error {    // 超时重新获取
+    d.mtx.Lock()
+    defer d.mtx.Unlock()
+
+    if d.lastUpdate.Add(d.timeout).After(time.Now()) {
+        return nil
+    }
+    
+    log.Println("rpc registry: refresh servers from registry", d.registry)
+    resp, err := http.Get(d.registry)   // 通过 http 请求服务注册表
+    if err != nil {
+        log.Println("rpc registry refresh error:", err)
+        return err
+    }
+
+    servers := strings.Split(resp.Header.Get("X-Geerpc-Servers"), ",")
+    d.servers = make([]string, 0, len(servers))
+    for _, server := range servers {
+        if strings.TrimSpace(server) != "" {
+            d.servers = append(d.servers, strings.TrimSpace(server))
+        }
+    }
+    d.lastUpdate = time.Now()
+    return nil
+}
+
+
+func (d *GeeRegistryDiscovery) Get(mode SelectMode) (string, error) {
+    if err := d.Refresh(); err != nil {
+        return "", err
+    }
+    return d.MultiServersDiscovery.Get(mode)
+}
+
+
+func (d *GeeRegistryDiscovery) GetAll() ([]string, error) {
+    if err := d.Refresh(); err != nil {
+        return nil, err
+    }
+    return d.MultiServersDiscovery.GetAll()
 }
