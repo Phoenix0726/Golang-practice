@@ -16,6 +16,7 @@ type Context struct {
 
     Path string
     Method string
+    Params map[string]string
 
     StatusCode int
 }
@@ -40,6 +41,12 @@ func (c *Context) PostForm(key string) string {
 // 从 URL 查询参数中获取指定键的值
 func (c *Context) Query(key string) string {
     return c.Req.URL.Query().Get(key)
+}
+
+
+func (c *Context) Param(key string) string {
+    value, _ := c.Params[key]
+    return value
 }
 
 
