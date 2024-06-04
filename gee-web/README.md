@@ -197,3 +197,106 @@ func (r *router) handle(c *Context) {
     }
 }
 ```
+
+# 前缀树路由
+
+**动态路由**：一条路由规则可以匹配某一类型而非某一条固定的路由
+
+如 /hello/:name，可以匹配 /hello/long、/hello/larry 等
+
+![Untitled](https://prod-files-secure.s3.us-west-2.amazonaws.com/79eaae57-40d3-4b29-af9a-eaa4e2e95d8d/b40c4fd6-f01c-4b1b-8a33-012ffcee7be7/Untitled.png)
+
+用 **Trie 树**实现动态路由匹配
+
+```go
+type node struct {
+    pattern string      // 待匹配路由，如/home/:user
+    part string         // 路由中的一部分，如:user
+    children []*node
+    isWild bool         // 表示当前节点part是否包含通配符
+}
+```
+
+```go
+func (t *node) insert(pattern string, parts []string, height int) {
+    if len(parts) == height {
+        t.pattern = pattern
+        return
+    }
+
+    part := parts[height]
+    child := t.matchChild(part)
+    if child == nil {
+        child = &node{
+            part: part,
+            isWild: part[0] == ':' || part[0] == '*',
+        }
+        t.children = append(t.children, child)
+    }
+
+    child.insert(pattern, parts, height+1)
+}
+
+func (t *node) search(parts []string, height int) *node {
+    if len(parts) == height || strings.HasPrefix(t.part, "*") {
+        if t.pattern == "" {
+            return nil
+        }
+        return t
+    }
+
+    part := parts[height]
+    children := t.matchChildren(part)
+
+    for _, child := range children {
+        result := child.search(parts, height+1)
+        if result != nil {
+            return result
+        }
+    }
+
+    return nil
+}
+```
+
+# 分组控制
+
+分组控制即路由的分组，如：
+
+- 以 `/post` 开头的的路由匿名可访问
+- 以 `/admin` 开头的路由需要鉴权
+- 以 `/api` 开头的路由是 `RESTful` 接口，可以对接第三方平台，需要第三方平台鉴权
+
+大部分情况下路由分组是以相同的前缀拉区分的。如 `/post` 是一个分组， `/post/a` 和 `/post/b` 可以是该分组下的子分组。作用在 `/post` 分组下的**中间件(middleware)**，也会作用在子分组，子分组还可以应用自己特有的中间件
+
+分组调用示例：
+
+```go
+r := gee.New()
+v1 := r.Group("/v1")
+v1.GET("/", func(c *gee.Context) {
+	c.HTML(http.StatusOK, "<h1>Hello Gee</h1>")
+})
+```
+
+**Group** 定义：
+
+```go
+type RouterGroup struct {
+    prefix string       // 该路由组的前缀
+    middlewares []HandlerFunc
+    parent *RouterGroup
+    engine *Engine      // 指向 Engine 实例的指针，所有 RouterGroup 共享一个 Engine 实例
+}
+```
+
+**Engine** 作为最顶层的分组，整个框架资源有 **Engine** 统一协调
+
+```go
+type Engine struct {
+    *RouterGroup    // 嵌套结构，类似于继承
+
+    router *router
+    groups []*RouterGroup   // 存储所有的路由组
+}
+```

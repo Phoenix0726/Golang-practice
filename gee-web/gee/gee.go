@@ -2,36 +2,67 @@ package gee
 
 import (
     "net/http"
+    "log"
 )
 
 
 type HandlerFunc func(*Context)
 
 
+type RouterGroup struct {
+    prefix string       // 该路由组的前缀
+    middlewares []HandlerFunc
+    parent *RouterGroup
+    engine *Engine      // 指向 Engine 实例的指针，所有 RouterGroup 共享一个 Engine 实例
+}
+
+
 type Engine struct {
+    *RouterGroup
+
     router *router
+    groups []*RouterGroup   // 存储所有的路由组
 }
 
 
 func New() *Engine {
-    return &Engine {
+    engine := &Engine {
         router: newRouter(),
     }
+    engine.RouterGroup = &RouterGroup {
+        engine: engine,
+    }
+    engine.groups = []*RouterGroup{engine.RouterGroup}
+    return engine
 }
 
 
-func (engine *Engine) addRoute(method string, pattern string, handler HandlerFunc) {
-    engine.router.addRoute(method, pattern, handler)
+func (group *RouterGroup) Group(prefix string) *RouterGroup {
+    engine := group.engine
+    newGroup := &RouterGroup {
+        prefix: group.prefix + prefix,
+        parent: group,
+        engine: engine,
+    }
+    engine.groups = append(engine.groups, newGroup)
+    return newGroup
 }
 
 
-func (engine *Engine) GET(pattern string, handler HandlerFunc) {
-    engine.addRoute("GET", pattern, handler)
+func (group *RouterGroup) addRoute(method string, pattern string, handler HandlerFunc) {
+    pattern = group.prefix + pattern
+    log.Printf("Route %4s - %s", method, pattern)
+    group.engine.router.addRoute(method, pattern, handler)
 }
 
 
-func (engine *Engine) POST(pattern string, handler HandlerFunc) {
-    engine.addRoute("POST", pattern, handler)
+func (group *RouterGroup) GET(pattern string, handler HandlerFunc) {
+    group.addRoute("GET", pattern, handler)
+}
+
+
+func (group *RouterGroup) POST(pattern string, handler HandlerFunc) {
+    group.addRoute("POST", pattern, handler)
 }
 
 
