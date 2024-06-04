@@ -300,3 +300,110 @@ type Engine struct {
     groups []*RouterGroup   // 存储所有的路由组
 }
 ```
+
+# 中间件
+
+**中间件(middlewares)，就是非业务的技术类组件**。框架提供一个插口，允许用户自定义功能，嵌入到框架中，就像这个功能是框架原生支持的一样。
+
+Gee 的中间件支持用户在请求被处理的前后，做一些额外的操作
+
+```go
+func Logger() HandlerFunc {
+	return func(c *Context) {
+		// Start timer
+		t := time.Now()
+		// Process request
+		c.Next()    // 表示等待执行其他的中间件或用户的 Handler
+		// Calculate resolution time
+		log.Printf("[%d] %s in %v", c.StatusCode, c.Req.RequestURI, time.Since(t))
+	}
+}
+```
+
+```go
+type Context struct {
+    // origin objects
+    Writer http.ResponseWriter
+    Req *http.Request
+    // request info
+    Path string
+    Method string
+    Params map[string]string
+    // response info
+    StatusCode int
+    // middleware
+    handlers []HandlerFunc
+    index int
+}
+
+func newContext(w http.ResponseWriter, req *http.Request) *Context {
+    return &Context {
+        Writer: w,
+        Req: req,
+        Path: req.URL.Path,
+        Method: req.Method,
+        index: -1,
+    }
+}
+
+func (c *Context) Next() {
+    c.index++
+    for size := len(c.handlers); c.index < size; c.index++ {
+        c.handlers[c.index](c)
+    }
+}
+```
+
+`index` 记录当前执行到第几个中间件，当在中间件中调用 `Next` 方法时，控制权交给下一个中间件
+
+如下面的例子：
+
+```go
+func A(c *Context) {
+    part1
+    c.Next()
+    part2
+}
+func B(c *Context) {
+    part3
+    c.Next()
+    part4
+}
+```
+
+假设应用了中间件 A 和 B，和路由映射的 Handler，则 `c.handlers` 内容为 `[A, B, Handler]` ，最终执行顺序为 `part1 -> part3 -> Handler -> part4 -> part2` 。
+
+定义 `Use` 函数，将中间件应用到某个 **Group**：
+
+```go
+func (group *RouterGroup) Use(middlewares ...HandlerFunc) {
+    group.middlewares = append(group.middlewares, middlewares...)
+}
+
+func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+    var middlewares []HandlerFunc
+    for _, group := range engine.groups {
+        if strings.HasPrefix(req.URL.Path, group.prefix) {
+            middlewares = append(middlewares, group.middlewares...)
+        }
+    }
+    c := newContext(w, req)
+    c.handlers = middlewares
+    engine.router.handle(c)
+}
+```
+
+使用中间件：
+
+```go
+r := gee.New()
+// 全局中间件
+r.Use(gee.Logger())
+// 给 v1 添加中间件
+v1 := r.Group("/v1")
+v1.Use(onlyForV1())
+```
+
+# Reference
+
+https://geektutu.com/post/gee.html
