@@ -23,7 +23,8 @@ func FormatAsDate(t time.Time) string {
 
 
 func main() {
-    r := gee.New()
+    // r := gee.New()
+    r := gee.Default()
 
     // 全局中间件
     r.Use(gee.Logger())
@@ -53,6 +54,11 @@ func main() {
             "title": "gee",
             "now": time.Date(2024, 6, 6, 0, 0, 0, 0, time.UTC),
         })
+    })
+
+    r.GET("/panic", func(c *gee.Context) {
+        names := []string{"Leslie"}
+        c.String(http.StatusOK, names[100])
     })
 
     r.Run(":9999")

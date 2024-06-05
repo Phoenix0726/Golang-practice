@@ -490,6 +490,44 @@ func (c *Context) HTML(code int, name string, data interface{}) {
 }
 ```
 
+# 错误恢复
+
+**Golang** 提供了 **recover** 函数，可以避免 **panic** 发生而导致整个程序终止。**recover** 函数只在 defer 中生效
+
+当 **panic** 被触发时，控制权就交给了 **defer**
+
+设计中间件 `Recovery` ，用于错误处理：
+
+```go
+func trace(msg string) string {
+    var pcs [32]uintptr
+    n := runtime.Callers(3, pcs[:])     // 跳过前三个调用帧，第 0 个是 Callers 本身，第 1 个是 trace，第 2 个是再上一层的 defer func
+
+    var str strings.Builder
+    str.WriteString(msg + "\nTraceback:")
+    for _, pc := range pcs[:n] {
+        fn := runtime.FuncForPC(pc)         // 获取给定 pc 所对应的函数信息
+        file, line := fn.FileLine(pc)       // 获取函数的源文件名和行号
+        str.WriteString(fmt.Sprintf("\n\t%s:%d", file, line))
+    }
+    return str.String()
+}
+
+func Recovery() HandlerFunc {
+    return func(c *Context) {
+        defer func() {
+            if err := recover(); err != nil {
+                msg := fmt.Sprintf("%s", err)
+                log.Printf("%s\n\n", trace(msg))
+                c.Fail(http.StatusInternalServerError, "Internal Server Error")
+            }
+        }()
+
+        c.Next()
+    }
+}
+```
+
 # Reference
 
 https://geektutu.com/post/gee.html
