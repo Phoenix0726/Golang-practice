@@ -404,6 +404,92 @@ v1 := r.Group("/v1")
 v1.Use(onlyForV1())
 ```
 
+# 模板 Template
+
+**gee** 框架需要解析请求的地址，映射到服务器文件的真实地址，交给 `http.FileServer` 处理
+
+```go
+func (group *RouterGroup) createStaticHandler(relativePath string, fs http.FileSystem) HandlerFunc {
+    absolutePath := path.Join(group.prefix, relativePath)
+    fileServer := http.StripPrefix(absolutePath, http.FileServer(fs))
+    return func(c *Context) {
+        file := c.Param("filepath")
+        if _, err := fs.Open(file); err != nil {
+            c.Status(http.StatusNotFound)
+            return
+        }
+
+        fileServer.ServeHTTP(c.Writer, c.Req)
+    }
+    /*
+        http.FileServer(fs) 创建一个文件服务器 http.Handler，用来访问文件系统 fs 中的文件
+        http.StripPrefix() 会将请求路径中匹配 absolutePath 的部分去掉，然后传递给文件服务器
+            如：absolutePath=/assets，请求路径为/assets/js/gee.js，则得到js/gee.js
+    */
+}
+
+func (group *RouterGroup) Static(relativePath string, root string) {
+    handler := group.createStaticHandler(relativePath, http.Dir(root))
+    urlPattern := path.Join(relativePath, "/*filepath")
+    group.GET(urlPattern, handler)
+}
+```
+
+通过 `Static` 方法，用户可以将磁盘上的某个文件夹 `root` 映射到路由 `relativePath` ，如：
+
+```go
+r := gee.New()
+r.Static("/assets", "./static")
+r.Run(":9999")
+```
+
+用户访问 `/localhost:9999/assets/js/gee.js` ，最终返回 `...(path)/static/gee.js` 
+
+通过 `html/template` 模板库渲染 HTML 模板：
+
+```go
+type Engine struct {
+    *RouterGroup
+
+    router *router
+    groups []*RouterGroup   // 存储所有的路由组
+
+    htmlTemplates *template.Template    // 用于存储模板
+    funcMap template.FuncMap            // 用于 HTML 模板渲染的自定义函数
+}
+
+func (engine *Engine) SetFuncMap(funcMap template.FuncMap) {
+    engine.funcMap = funcMap
+}
+
+func (engine *Engine) LoadHTMLGlob(pattern string) {
+    engine.htmlTemplates = template.Must(template.New("").Funcs(engine.funcMap).ParseGlob(pattern))
+    /*
+        template.New("") 创建一个新的模板集合，不设置任何前缀
+        .Funcs() 方法将自定义的函数映射添加到模板
+        .ParseGlob(pattern) 解析所有匹配 pattern 的文件，并添加到模板集合中
+        template.Must 检查模板解析过程中是否有错误发生
+    */
+}
+```
+
+修改 `(*Context).HTML` ，支持根据根据模板文件名选择模板进行渲染：
+
+```go
+func (c *Context) HTML(code int, name string, data interface{}) {
+    c.SetHeader("Content-Type", "text/html")
+    c.Status(code)
+    if err := c.engine.htmlTemplates.ExecuteTemplate(c.Writer, name, data); err != nil {
+        c.Fail(500, err.Error())
+    }
+    /*
+        ExecuteTemplate 用于渲染一个指定模板，并将结果写入到一个 io.Writer 接口中
+        name -- 要执行的模板的名称
+        data -- 传递给模板的数据
+    */
+}
+```
+
 # Reference
 
 https://geektutu.com/post/gee.html
